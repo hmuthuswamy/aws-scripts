@@ -1,0 +1,50 @@
+---
+- hosts: localhost
+  vars:
+  remote_user: root
+  tasks:
+  - name: ensure apache is at the latest version
+    yum: name=httpd,mod_ssl state=latest
+
+  - name: Create document root directory for httpd
+    file: path=/apps/hello-http/html state=directory
+
+  - name: modify document directive
+    template: src=httpd.conf.j2 dest=/etc/httpd/conf/httpd.conf force=yes
+  - name: add hello.html to DirectoryIndex
+    lineinfile: dest=/etc/httpd/conf/httpd.conf regexp="DirectoryIndex index.html" line="DirectoryIndex index.html hello.html" state=present
+  - name: remove port 80 listen directive
+    lineinfile: dest=/etc/httpd/conf/httpd.conf regexp="Listen" state=absent
+
+  - name: modify ssl.conf file
+    lineinfile: dest=/etc/httpd/conf.d/ssl.conf regexp="SSLProtocol all -SSLv2" line="SSLProtocol all -SSLv2 -SSLv3 -TLSv1 -TLSv1.1" state=present
+    lineinfile: dest=/etc/httpd/conf.d/ssl.conf regexp="SSLCertificateKeyFile /etc/pki/tls/private/localhost.key" line="SSLCertificateKeyFile /etc/pki/tls/private/ca.key" state=present
+    lineinfile: dest=/etc/httpd/conf.d/ssl.conf regexp="SSLCertificateKeyFile" state=absent
+    lineinfile: dest=/etc/httpd/conf.d/ssl.conf regexp="SSLCertificateFile" state=absent
+    lineinfile: dest=/etc/httpd/conf.d/ssl.conf line="SSLCertificateFile /etc/pki/tls/certs/ca.crt" insertafter="SSLProtocol all -SSLv2 -SSLv3 -TLSv1 -TLSv1.1"
+    lineinfile: dest=/etc/httpd/conf.d/ssl.conf line="SSLCertificateKeyFile /etc/pki/tls/private/ca.key" insertafter="SSLCertificateFile /etc/pki/tls/certs/ca.crt"
+
+  - name: create self-signed SSL cert
+    command: openssl req -new -nodes -x509 -subj "/C=US/ST=Oregon/L=Portland/O=IT/CN=${ansible_fqdn}" -days 3650 -keyout /etc/pki/tls/private/ca.key -out /etc/pki/tls/certs/ca.crt -extensions v3_ca creates=/etc/pki/tls/certs/ca.crt
+
+  - name: Create web logs directory
+    file: path=/var/log/weblogs/http state=directory
+  - stat: "path=/etc/httpd/logs"
+    register: dead_link
+
+  - name: Remove stale link
+    file: path=/etc/httpd/logs state=absent
+    when: dead_link.stat.exists == True
+
+  - name: Create link to web logs directory
+    file: src=/var/log/weblogs/http dest=/etc/httpd/logs state=link
+
+  - name: Create hello.html empty file
+    file: path=/apps/hello-http/html/hello.html state=touch owner=root group=sys mode=0555
+
+  - name: Add content to the hello.html file
+    lineinfile: dest=/apps/hello-http/html/hello.html regexp='' insertbefore=BOF line='<!DOCTYPE html PUBLIC "-//IETF//DTD HTML 2.0//EN"> <HTML><HEAD><TITLE>Hello Test</TITLE></HEAD><BODY><H1>Hello - Test</H1></BODY></HTML>'
+  - name: Start httpd service
+    service: name=httpd state=started
+  - name: Start httpd service
+    service: name=httpd state=reloaded
